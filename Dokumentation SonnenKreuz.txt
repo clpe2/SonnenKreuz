@@ -1,0 +1,28 @@
+Dokumentation PhotoResistor|Kreuz
+
+Realisierung mittels Kreuz.
+Sensor S
+
+	S	|	S
+   _____|_____
+		|	
+	S	|	S
+
+Funktion: Sonne Senkrecht -> Alle Sensoren gleich viel Licht 							=> Keine Bewegung
+		  Sonne	Schräg    -> Kreuz wirft Schatten auf Sensor(en) und Widerstand steigt	=> Arduino regelt nach bis Schatten weg
+
+Abhängigkeit/Dimensionierung:
+Wie empfindlich soll das System sein (?)
+
+Höhe h vom Kreuz Einfluss auf Akzeptanzwinkel α:
+	- Zu hoch 	 -> Sehr empfindlich (Motor zittern )
+	- zu niedrig -> Trägessystem da Schatten sich nur langsam bewegt
+
+Winkel alpha α : Sensor Reaktion 
+d = Abstand vom Kreuz zur Sensormitte
+h = Höhe des Kreuzes
+alpha = Der Einfallswinkel der Sonne (Abweichung vom Lot)
+
+ tan(α)= d/h
+ 
+ 
