@@ -1,28 +1,36 @@
 #include <Servo.h>
 
 /*
- * SOLAR TRACKER COMPLETE SYSTEM (Dual Axis)
- * Hardware: 4x LDR an A0-A3 | 2x Servo an D9 & D10
+ * SOLAR TRACKER - SMOOTH EDITION
+ * Features: 
+ * 1. Hysterese (kein Zittern bei kleinen Wolken)
+ * 2. Speed-Limit (Max 5 Grad pro Sekunde)
  */
 
 // --- 1. PIN KONFIGURATION ---
-// Sensoren (Deine Belegung)
-const int PIN_OBEN   = A0;  // 12 Uhr
-const int PIN_UNTEN  = A2;  // 6 Uhr
-const int PIN_LINKS  = A3;  // 9 Uhr
-const int PIN_RECHTS = A1;  // 3 Uhr
+const int PIN_OBEN   = A0; 
+const int PIN_UNTEN  = A2; 
+const int PIN_LINKS  = A3; 
+const int PIN_RECHTS = A1; 
 
-// Servos
-const int PIN_SERVO_HORIZ = 9;  // Unten (Drehen)
-const int PIN_SERVO_VERT  = 10; // Oben (Kippen)
+const int PIN_SERVO_HORIZ = 9;  
+const int PIN_SERVO_VERT  = 10; 
 
-// --- 2. OBJEKTE & EINSTELLUNGEN ---
+// --- 2. OBJEKTE ---
 Servo servoHorizontal;
 Servo servoVertikal;
 
-// Ingenieurs-Parameter (P-Regler)
-const int TOLERANZ    = 50;   // Hysterese (Deadband)
-const int WARTEZEIT   = 50;   // Update-Rate in ms
+// --- 3. EINSTELLUNGEN ---
+
+// Hysterese: Je höher der Wert, desto "fauler" ist der Tracker.
+// 50-100 ist gut für draußen. Er bewegt sich erst, wenn der Unterschied deutlich ist.
+const int TOLERANZ = 100;   
+
+// Geschwindigkeit: 
+// Wir bewegen uns immer 1 Grad pro Zyklus.
+// Die Pause bestimmt die Geschwindigkeit.
+// 200ms Pause = 5 Schritte pro Sekunde (5°/sek)
+const int WARTEZEIT = 200; 
 
 // Limits (Mechanischer Schutz)
 const int LIMIT_VERT_MIN = 20;   
@@ -30,84 +38,66 @@ const int LIMIT_VERT_MAX = 160;
 const int LIMIT_HORIZ_MIN = 0;
 const int LIMIT_HORIZ_MAX = 180;
 
-// Start-Winkel
-int zielWinkelVertikal   = 90; 
-int zielWinkelHorizontal = 90; 
+// Aktuelle Positionen
+int winkelVertikal   = 90; 
+int winkelHorizontal = 90; 
 
 void setup() {
   Serial.begin(9600);
   
-  // Servos initialisieren
   servoHorizontal.attach(PIN_SERVO_HORIZ);
   servoVertikal.attach(PIN_SERVO_VERT);
 
-  // Startposition anfahren
-  servoHorizontal.write(zielWinkelHorizontal);
-  servoVertikal.write(zielWinkelVertikal);
+  // Startposition einnehmen
+  servoHorizontal.write(winkelHorizontal);
+  servoVertikal.write(winkelVertikal);
 
-  Serial.println("--- SOLAR TRACKER GESTARTET ---");
-  delay(1000);
+  Serial.println("--- SOLAR TRACKER (SMOOTH MODE) GESTARTET ---");
 }
 
 void loop() {
-  // === A. REGLER-PARAMETER ===
-  float Kp = 0.15;      // Reaktionsstärke
-  int minSchritt = 1;   
-  int maxSchritt = 5;   
-
-  // === B. MESSUNG ===
-  // Wir lesen die Helligkeitswerte der 4 LDRs
+  // === A. MESSUNG ===
+  // Wir lesen die Sensoren
   int valOben   = analogRead(PIN_OBEN);
   int valUnten  = analogRead(PIN_UNTEN);
   int valLinks  = analogRead(PIN_LINKS);
   int valRechts = analogRead(PIN_RECHTS);
 
-  // === C. LOGIK VERTIKAL (Neigung) ===
+  // === B. LOGIK VERTIKAL (Oben/Unten) ===
   int diffVert = valOben - valUnten;
   
+  // Hysterese-Check: Nur bewegen, wenn Unterschied > Toleranz
   if (abs(diffVert) > TOLERANZ) {
-    // Geschwindigkeit berechnen
-    int speed = abs(diffVert) * Kp;
-    speed = constrain(speed, minSchritt, maxSchritt);
     
-    // Richtung bestimmen
     if (valOben > valUnten) {
-      zielWinkelVertikal += speed;  // Nach Oben schauen
+      winkelVertikal++;  // Nur 1 Grad Schritt (Langsam!)
     } else {
-      zielWinkelVertikal -= speed;  // Nach Unten schauen
+      winkelVertikal--;  // Nur 1 Grad Schritt
     }
   }
 
-  // === D. LOGIK HORIZONTAL (Drehung) ===
+  // === C. LOGIK HORIZONTAL (Links/Rechts) ===
   int diffHoriz = valLinks - valRechts;
 
   if (abs(diffHoriz) > TOLERANZ) {
-    int speed = abs(diffHoriz) * Kp;
-    speed = constrain(speed, minSchritt, maxSchritt);
-
+    
     if (valLinks > valRechts) {
-      zielWinkelHorizontal -= speed; // Nach Links drehen
+      winkelHorizontal--; // Nur 1 Grad Schritt
     } else {
-      zielWinkelHorizontal += speed; // Nach Rechts drehen
+      winkelHorizontal++; // Nur 1 Grad Schritt
     }
   }
 
-  // === E. SICHERHEIT (Constraints) ===
-  // Verhindert, dass die Servos gegen den Anschlag knallen
-  zielWinkelVertikal   = constrain(zielWinkelVertikal, LIMIT_VERT_MIN, LIMIT_VERT_MAX);
-  zielWinkelHorizontal = constrain(zielWinkelHorizontal, LIMIT_HORIZ_MIN, LIMIT_HORIZ_MAX);
+  // === D. SICHERHEIT (Begrenzungen) ===
+  winkelVertikal   = constrain(winkelVertikal, LIMIT_VERT_MIN, LIMIT_VERT_MAX);
+  winkelHorizontal = constrain(winkelHorizontal, LIMIT_HORIZ_MIN, LIMIT_HORIZ_MAX);
 
-  // === F. MOTOR-STEUERUNG (Das Wichtigste!) ===
-  // Hier werden die berechneten Winkel an die Servos gesendet
-  servoHorizontal.write(zielWinkelHorizontal);
-  servoVertikal.write(zielWinkelVertikal);
+  // === E. MOTOR UPDATE ===
+  servoHorizontal.write(winkelHorizontal);
+  servoVertikal.write(winkelVertikal);
 
-  // === G. DEBUGGING ===
-  // Zeigt dir im Seriellen Monitor, was passiert
-  /*
-  Serial.print("V_Ziel:"); Serial.print(zielWinkelVertikal);
-  Serial.print("\tH_Ziel:"); Serial.println(zielWinkelHorizontal);
-  */
-  
-  delay(WARTEZEIT);
+  // === F. GESCHWINDIGKEITS-BREMSE ===
+  // Hier passiert die Magie für die 5 Grad/Sekunde.
+  // Der Arduino macht jetzt 200ms Pause, bevor er wieder misst und sich bewegt.
+  delay(WARTEZEIT); 
 }
