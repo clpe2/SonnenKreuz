@@ -1,0 +1,122 @@
+/*
+ * SOLAR TRACKER LOGIC MODULE (Closed Loop)
+ * Hardware: 4x Lichtsensoren an A0-A3 (über selbst gecrimptes Kabel)
+ * Output: Ziel-Winkel für Azimut (Horiz) und Elevation (Vert)
+ */
+
+// --- 1. PIN KONFIGURATION (Angepasst an Kreis-Anordnung) ---
+
+// PAAR 1: VERTIKAL (Muss gegenüberliegen!)
+const int PIN_OBEN   = A0;  // 12 Uhr
+const int PIN_UNTEN  = A2;  // 6 Uhr  <-- Hier A2 statt A1!
+
+// PAAR 2: HORIZONTAL (Muss gegenüberliegen!)
+const int PIN_LINKS  = A3;  // 9 Uhr  <-- Hier A3 statt A2!
+const int PIN_RECHTS = A1;  // 3 Uhr
+
+// --- 2. EINSTELLUNGEN (Ingenieurs-Parameter) ---
+const int TOLERANZ      = 50;  // Hysterese: Erst bewegen, wenn Diff > 50
+const int SCHRITTWEITE  = 1;   // Geschwindigkeit: 1 Grad pro Zyklus
+const int WARTEZEIT     = 50;  // Taktung in ms
+
+// Software-Limits (Damit nichts abbreißt)
+const int LIMIT_VERT_MIN = 20;  
+const int LIMIT_VERT_MAX = 160;
+const int LIMIT_HORIZ_MIN = 0;
+const int LIMIT_HORIZ_MAX = 180;
+
+// --- 3. STATUS-VARIABLEN (Das Ergebnis) ---
+// Diese Werte gibst du an den Motor-Treiber weiter
+int zielWinkelVertikal   = 90; // Start bei 90 Grad
+int zielWinkelHorizontal = 90; // Start bei 90 Grad
+
+void setup() {
+  Serial.begin(9600);
+  Serial.println("--- SOLAR TRACKER LOGIC GESTARTET ---");
+  Serial.println("Test-Modus: Bitte Sensoren einzeln abdecken um Zuordnung zu prüfen!");
+  delay(2000);
+}
+
+void loop() {
+  // === A. KONFIGURATION P-REGLER ===
+  // Das sind deine "Tuning-Knöpfe"
+  float Kp = 0.15;       // Stärke der Reaktion (0.1 = sanft, 0.3 = aggressiv)
+  int minSchritt = 1;    // Mindestens 1 Grad (damit er nicht stecken bleibt)
+  int maxSchritt = 5;    // Höchstens 5 Grad auf einmal (Sicherheit)
+
+  // === B. MESSUNG ===
+  int valOben   = analogRead(PIN_OBEN);
+  int valUnten  = analogRead(PIN_UNTEN);
+  int valLinks  = analogRead(PIN_LINKS);
+  int valRechts = analogRead(PIN_RECHTS);
+
+  // === C. LOGIK (Der P-Regler) ===
+  
+  // --- ACHSE 1: VERTIKAL ---
+  int diffVert = valOben - valUnten; // Der "Fehler"
+  
+  if (abs(diffVert) > TOLERANZ) {
+    // 1. Berechne die Geschwindigkeit basierend auf der Größe des Fehlers
+    int speed = abs(diffVert) * Kp;
+    
+    // 2. Begrenzungen anwenden (Clamping)
+    if (speed < minSchritt) speed = minSchritt; // Nicht stehenbleiben
+    if (speed > maxSchritt) speed = maxSchritt; // Nicht rasen
+    
+    // 3. Richtung anwenden
+    if (valOben > valUnten) {
+      zielWinkelVertikal += speed; 
+    } else {
+      zielWinkelVertikal -= speed;
+    }
+  }
+
+  // --- ACHSE 2: HORIZONTAL ---
+  int diffHoriz = valLinks - valRechts; // Der "Fehler"
+
+  if (abs(diffHoriz) > TOLERANZ) {
+    int speed = abs(diffHoriz) * Kp;
+    
+    if (speed < minSchritt) speed = minSchritt;
+    if (speed > maxSchritt) speed = maxSchritt;
+
+    if (valLinks > valRechts) {
+      zielWinkelHorizontal -= speed; 
+    } else {
+      zielWinkelHorizontal += speed; 
+    }
+  }
+
+  // === D. SICHERHEIT (Constraints) ===
+  // Winkel begrenzen (WICHTIG!)
+  zielWinkelVertikal   = constrain(zielWinkelVertikal, LIMIT_VERT_MIN, LIMIT_VERT_MAX);
+  zielWinkelHorizontal = constrain(zielWinkelHorizontal, LIMIT_HORIZ_MIN, LIMIT_HORIZ_MAX);
+
+  // === E. OUTPUT ===
+  // Plotter-Format: "Variable:Wert"
+  Serial.print("Ziel_V:");     Serial.print(zielWinkelVertikal);
+  Serial.print("\t"); 
+  Serial.print("Ziel_H:");   Serial.println(zielWinkelHorizontal);
+  
+  delay(WARTEZEIT);
+}
+
+  // === C. SICHERHEIT (Constraints) ===
+  // Winkel begrenzen
+  zielWinkelVertikal   = constrain(zielWinkelVertikal, LIMIT_VERT_MIN, LIMIT_VERT_MAX);
+  zielWinkelHorizontal = constrain(zielWinkelHorizontal, LIMIT_HORIZ_MIN, LIMIT_HORIZ_MAX);
+
+  // === D. OUTPUT (Interface) ===
+  // Das hier zeigst du deinem Kollegen oder im Plotter
+  
+  // Format für Seriellen Plotter: "Label:Wert"
+  Serial.print("Ziel_V:");     Serial.print(zielWinkelVertikal);
+  Serial.print("\t"); // Tabulator Trennung
+  Serial.print("Ziel_H:");   Serial.println(zielWinkelHorizontal);
+  
+  // Optional: Rohwerte sehen (zum Debuggen des Kabels)
+  // Entferne die "//" vor der nächsten Zeile, wenn du testen willst:
+  // Serial.print("O:"); Serial.print(valOben); Serial.print(" U:"); Serial.print(valUnten); Serial.println();
+
+  delay(WARTEZEIT);
+}
