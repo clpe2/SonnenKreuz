@@ -1,70 +1,66 @@
 #include <Servo.h>
 
-Servo servoHorizontal;
-Servo servoVertikal;
-
-// Wir definieren eine "Virtuelle Null". 
-// Alles unter 20 Grad ist dein "Minus-Bereich".
-int startWinkel = 20; 
-int zielWinkel = 110; // Das sind 90 Grad Bewegung (20 + 90)
+Servo servoHorizontal; // Pin 9
+Servo servoVertikal;   // Pin 10
 
 void setup() {
   Serial.begin(9600);
+  
+  // Servos an die Pins hängen
   servoHorizontal.attach(9);
   servoVertikal.attach(10);
 
-  // Zuerst auf die Startposition (20 Grad)
-  // WICHTIG: Wenn du jetzt die Arme anschraubst, 
-  // muss das Solarmodul GERADE stehen (oder ganz am Anfang der Drehung).
-  servoHorizontal.write(startWinkel);
-  servoVertikal.write(startWinkel);
+  // Sicherstellen, dass sie beim Start auf 0 stehen
+  servoHorizontal.write(0);
+  servoVertikal.write(0);
   
-  Serial.println("Servos stehen auf 20 Grad (Physikalischer Start).");
-  Serial.println("Du hast jetzt noch 20 Grad Reserve nach 'unten'.");
-  delay(3000); 
+  Serial.println("System gestartet. Servos auf 0 gesetzt.");
 }
 
 void loop() {
   // ---------------------------------------------------------
-  // SCHRITT 1: Warten am Startpunkt (Logisch 20°)
+  // SCHRITT 1: 10 Sekunden bei 0 Grad warten
   // ---------------------------------------------------------
-  Serial.println("Warte am Startpunkt...");
-  delay(5000); 
+  Serial.println("Warte 10 Sekunden bei 0 Grad...");
+  delay(10000); // 10.000 Millisekunden = 10 Sekunden
 
   // ---------------------------------------------------------
-  // SCHRITT 2: Hochfahren (von 20 auf 110)
+  // SCHRITT 2: Langsam von 0 auf 90 Grad fahren
+  // (Jede Sekunde +5 Grad)
   // ---------------------------------------------------------
-  Serial.println("Fahre hoch...");
-  for (int pos = startWinkel; pos <= zielWinkel; pos += 5) {
+  Serial.println("Fahre langsam hoch zu 90 Grad...");
+  
+  for (int pos = 0; pos <= 90; pos += 5) {
     servoHorizontal.write(pos);
     servoVertikal.write(pos);
-    delay(1000); 
+    
+    Serial.print("Position: ");
+    Serial.println(pos);
+    
+    delay(1000); // 1 Sekunde warten pro 5-Grad-Schritt
   }
 
   // ---------------------------------------------------------
-  // SCHRITT 3: Warten am Ziel
+  // SCHRITT 3: 10 Sekunden bei 90 Grad warten
   // ---------------------------------------------------------
-  Serial.println("Oben angekommen. Warte...");
-  delay(5000); 
+  Serial.println("Ziel erreicht. Warte 10 Sekunden bei 90 Grad...");
+  delay(10000); 
 
   // ---------------------------------------------------------
-  // SCHRITT 4: Zurückfahren (von 110 auf 20)
+  // SCHRITT 4: Langsam von 90 zurück auf 0 Grad fahren
+  // (Jede Sekunde -5 Grad)
   // ---------------------------------------------------------
-  Serial.println("Fahre zurueck...");
-  for (int pos = zielWinkel; pos >= startWinkel; pos -= 5) {
+  Serial.println("Fahre langsam zurueck zu 0 Grad...");
+  
+  for (int pos = 90; pos >= 0; pos -= 5) {
     servoHorizontal.write(pos);
     servoVertikal.write(pos);
-    delay(1000); 
+    
+    Serial.print("Position: ");
+    Serial.println(pos);
+    
+    delay(1000); // 1 Sekunde warten pro 5-Grad-Schritt
   }
   
-  // OPTIONAL: Test der Reserve (Der "-20 Grad"-Bereich)
-  Serial.println("TEST: Fahre jetzt in den Minus-Bereich (auf echte 0)...");
-  servoHorizontal.write(0);
-  servoVertikal.write(0);
-  delay(2000);
-  
-  // Und wieder zum Start
-  servoHorizontal.write(startWinkel);
-  servoVertikal.write(startWinkel);
-  Serial.println("Wieder am Start (20).");
+  Serial.println("Zyklus beendet. Beginne von vorne...");
 }
