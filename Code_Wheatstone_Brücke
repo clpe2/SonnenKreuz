@@ -1,122 +1,97 @@
 /*
- * SOLAR TRACKER LOGIC MODULE (Closed Loop)
- * Hardware: 4x Lichtsensoren an A0-A3 (über selbst gecrimptes Kabel)
- * Output: Ziel-Winkel für Azimut (Horiz) und Elevation (Vert)
+ * SOLAR TRACKER LOGIC (P-CONTROL)
+ * Hardware: Keyestudio 3-Pin Module (Widerstand ist intern verbaut)
+ * Verkabelung: S -> Analog Pin, V -> 5V, G -> GND
  */
 
-// --- 1. PIN KONFIGURATION (Angepasst an Kreis-Anordnung) ---
+// --- 1. PIN ZUORDNUNG (Kreis-Anordnung) ---
+// Oben (12 Uhr)
+const int PIN_OBEN   = A0;
+// Unten (6 Uhr) - Gegenüber von A0
+const int PIN_UNTEN  = A2;
 
-// PAAR 1: VERTIKAL (Muss gegenüberliegen!)
-const int PIN_OBEN   = A0;  // 12 Uhr
-const int PIN_UNTEN  = A2;  // 6 Uhr  <-- Hier A2 statt A1!
+// Links (9 Uhr)
+const int PIN_LINKS  = A3;
+// Rechts (3 Uhr) - Gegenüber von A3
+const int PIN_RECHTS = A1;
 
-// PAAR 2: HORIZONTAL (Muss gegenüberliegen!)
-const int PIN_LINKS  = A3;  // 9 Uhr  <-- Hier A3 statt A2!
-const int PIN_RECHTS = A1;  // 3 Uhr
+// --- 2. P-REGLER EINSTELLUNGEN ---
+// Hier stellst du die Empfindlichkeit ein
+float Kp = 0.15;       // Verstärkung: 0.15 ist ein guter Mittelwert
+int minSchritt = 1;    // Mindestens 1 Grad bewegen (gegen Haftreibung)
+int maxSchritt = 5;    // Maximal 5 Grad springen (Sicherheit)
+int toleranz   = 40;   // Hysterese: Erst ab Diff > 40 reagieren
 
-// --- 2. EINSTELLUNGEN (Ingenieurs-Parameter) ---
-const int TOLERANZ      = 50;  // Hysterese: Erst bewegen, wenn Diff > 50
-const int SCHRITTWEITE  = 1;   // Geschwindigkeit: 1 Grad pro Zyklus
-const int WARTEZEIT     = 50;  // Taktung in ms
+// --- 3. STATUS VARIABLES ---
+// Startposition in der Mitte
+int winkelVertikal   = 90; 
+int winkelHorizontal = 90; 
 
-// Software-Limits (Damit nichts abbreißt)
-const int LIMIT_VERT_MIN = 20;  
-const int LIMIT_VERT_MAX = 160;
-const int LIMIT_HORIZ_MIN = 0;
-const int LIMIT_HORIZ_MAX = 180;
-
-// --- 3. STATUS-VARIABLEN (Das Ergebnis) ---
-// Diese Werte gibst du an den Motor-Treiber weiter
-int zielWinkelVertikal   = 90; // Start bei 90 Grad
-int zielWinkelHorizontal = 90; // Start bei 90 Grad
+// Sicherheits-Limits für die Servos
+const int LIMIT_V_MIN = 20;  
+const int LIMIT_V_MAX = 160;
+const int LIMIT_H_MIN = 0;
+const int LIMIT_H_MAX = 180;
 
 void setup() {
   Serial.begin(9600);
-  Serial.println("--- SOLAR TRACKER LOGIC GESTARTET ---");
-  Serial.println("Test-Modus: Bitte Sensoren einzeln abdecken um Zuordnung zu prüfen!");
-  delay(2000);
+  Serial.println("--- SOLAR TRACKER: P-CONTROL MODUS ---");
 }
 
 void loop() {
-  // === A. KONFIGURATION P-REGLER ===
-  // Das sind deine "Tuning-Knöpfe"
-  float Kp = 0.15;       // Stärke der Reaktion (0.1 = sanft, 0.3 = aggressiv)
-  int minSchritt = 1;    // Mindestens 1 Grad (damit er nicht stecken bleibt)
-  int maxSchritt = 5;    // Höchstens 5 Grad auf einmal (Sicherheit)
-
-  // === B. MESSUNG ===
+  // === A. MESSUNG ===
+  // Keyestudio Module: Viel Licht = Hoher Wert (meistens)
   int valOben   = analogRead(PIN_OBEN);
   int valUnten  = analogRead(PIN_UNTEN);
   int valLinks  = analogRead(PIN_LINKS);
   int valRechts = analogRead(PIN_RECHTS);
 
-  // === C. LOGIK (Der P-Regler) ===
+  // === B. LOGIK FÜR VERTIKAL (Hoch/Runter) ===
+  int diffVert = valOben - valUnten;
   
-  // --- ACHSE 1: VERTIKAL ---
-  int diffVert = valOben - valUnten; // Der "Fehler"
-  
-  if (abs(diffVert) > TOLERANZ) {
-    // 1. Berechne die Geschwindigkeit basierend auf der Größe des Fehlers
+  if (abs(diffVert) > toleranz) {
+    // 1. P-Regler: Berechne Geschwindigkeit dynamisch
     int speed = abs(diffVert) * Kp;
     
-    // 2. Begrenzungen anwenden (Clamping)
-    if (speed < minSchritt) speed = minSchritt; // Nicht stehenbleiben
-    if (speed > maxSchritt) speed = maxSchritt; // Nicht rasen
+    // 2. Begrenzer (Clamping)
+    if (speed < minSchritt) speed = minSchritt;
+    if (speed > maxSchritt) speed = maxSchritt;
     
-    // 3. Richtung anwenden
+    // 3. Bewegung
+    // Falls er falsch herum läuft, tausche hier + und -
     if (valOben > valUnten) {
-      zielWinkelVertikal += speed; 
+      winkelVertikal += speed; // Nach Oben schauen
     } else {
-      zielWinkelVertikal -= speed;
+      winkelVertikal -= speed; // Nach Unten schauen
     }
   }
 
-  // --- ACHSE 2: HORIZONTAL ---
-  int diffHoriz = valLinks - valRechts; // Der "Fehler"
+  // === C. LOGIK FÜR HORIZONTAL (Links/Rechts) ===
+  int diffHoriz = valLinks - valRechts;
 
-  if (abs(diffHoriz) > TOLERANZ) {
+  if (abs(diffHoriz) > toleranz) {
     int speed = abs(diffHoriz) * Kp;
     
     if (speed < minSchritt) speed = minSchritt;
     if (speed > maxSchritt) speed = maxSchritt;
 
+    // Falls er falsch herum läuft, tausche hier + und -
     if (valLinks > valRechts) {
-      zielWinkelHorizontal -= speed; 
+      winkelHorizontal -= speed; // Nach Links drehen
     } else {
-      zielWinkelHorizontal += speed; 
+      winkelHorizontal += speed; // Nach Rechts drehen
     }
   }
 
-  // === D. SICHERHEIT (Constraints) ===
-  // Winkel begrenzen (WICHTIG!)
-  zielWinkelVertikal   = constrain(zielWinkelVertikal, LIMIT_VERT_MIN, LIMIT_VERT_MAX);
-  zielWinkelHorizontal = constrain(zielWinkelHorizontal, LIMIT_HORIZ_MIN, LIMIT_HORIZ_MAX);
+  // === D. SICHERHEIT & OUTPUT ===
+  // Verhindern, dass der Motor gegen die Wand fährt
+  winkelVertikal   = constrain(winkelVertikal, LIMIT_V_MIN, LIMIT_V_MAX);
+  winkelHorizontal = constrain(winkelHorizontal, LIMIT_H_MIN, LIMIT_H_MAX);
 
-  // === E. OUTPUT ===
-  // Plotter-Format: "Variable:Wert"
-  Serial.print("Ziel_V:");     Serial.print(zielWinkelVertikal);
+  // Ausgabe für den Plotter
+  Serial.print("Ziel_V:");     Serial.print(winkelVertikal);
   Serial.print("\t"); 
-  Serial.print("Ziel_H:");   Serial.println(zielWinkelHorizontal);
+  Serial.print("Ziel_H:");   Serial.println(winkelHorizontal);
   
-  delay(WARTEZEIT);
-}
-
-  // === C. SICHERHEIT (Constraints) ===
-  // Winkel begrenzen
-  zielWinkelVertikal   = constrain(zielWinkelVertikal, LIMIT_VERT_MIN, LIMIT_VERT_MAX);
-  zielWinkelHorizontal = constrain(zielWinkelHorizontal, LIMIT_HORIZ_MIN, LIMIT_HORIZ_MAX);
-
-  // === D. OUTPUT (Interface) ===
-  // Das hier zeigst du deinem Kollegen oder im Plotter
-  
-  // Format für Seriellen Plotter: "Label:Wert"
-  Serial.print("Ziel_V:");     Serial.print(zielWinkelVertikal);
-  Serial.print("\t"); // Tabulator Trennung
-  Serial.print("Ziel_H:");   Serial.println(zielWinkelHorizontal);
-  
-  // Optional: Rohwerte sehen (zum Debuggen des Kabels)
-  // Entferne die "//" vor der nächsten Zeile, wenn du testen willst:
-  // Serial.print("O:"); Serial.print(valOben); Serial.print(" U:"); Serial.print(valUnten); Serial.println();
-
-  delay(WARTEZEIT);
+  delay(50); // Kleines Päuschen für Stabilität
 }
