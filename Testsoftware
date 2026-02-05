@@ -1,0 +1,70 @@
+#include <Servo.h>
+
+Servo servoHorizontal;
+Servo servoVertikal;
+
+// Wir definieren eine "Virtuelle Null". 
+// Alles unter 20 Grad ist dein "Minus-Bereich".
+int startWinkel = 20; 
+int zielWinkel = 110; // Das sind 90 Grad Bewegung (20 + 90)
+
+void setup() {
+  Serial.begin(9600);
+  servoHorizontal.attach(9);
+  servoVertikal.attach(10);
+
+  // Zuerst auf die Startposition (20 Grad)
+  // WICHTIG: Wenn du jetzt die Arme anschraubst, 
+  // muss das Solarmodul GERADE stehen (oder ganz am Anfang der Drehung).
+  servoHorizontal.write(startWinkel);
+  servoVertikal.write(startWinkel);
+  
+  Serial.println("Servos stehen auf 20 Grad (Physikalischer Start).");
+  Serial.println("Du hast jetzt noch 20 Grad Reserve nach 'unten'.");
+  delay(3000); 
+}
+
+void loop() {
+  // ---------------------------------------------------------
+  // SCHRITT 1: Warten am Startpunkt (Logisch 20°)
+  // ---------------------------------------------------------
+  Serial.println("Warte am Startpunkt...");
+  delay(5000); 
+
+  // ---------------------------------------------------------
+  // SCHRITT 2: Hochfahren (von 20 auf 110)
+  // ---------------------------------------------------------
+  Serial.println("Fahre hoch...");
+  for (int pos = startWinkel; pos <= zielWinkel; pos += 5) {
+    servoHorizontal.write(pos);
+    servoVertikal.write(pos);
+    delay(1000); 
+  }
+
+  // ---------------------------------------------------------
+  // SCHRITT 3: Warten am Ziel
+  // ---------------------------------------------------------
+  Serial.println("Oben angekommen. Warte...");
+  delay(5000); 
+
+  // ---------------------------------------------------------
+  // SCHRITT 4: Zurückfahren (von 110 auf 20)
+  // ---------------------------------------------------------
+  Serial.println("Fahre zurueck...");
+  for (int pos = zielWinkel; pos >= startWinkel; pos -= 5) {
+    servoHorizontal.write(pos);
+    servoVertikal.write(pos);
+    delay(1000); 
+  }
+  
+  // OPTIONAL: Test der Reserve (Der "-20 Grad"-Bereich)
+  Serial.println("TEST: Fahre jetzt in den Minus-Bereich (auf echte 0)...");
+  servoHorizontal.write(0);
+  servoVertikal.write(0);
+  delay(2000);
+  
+  // Und wieder zum Start
+  servoHorizontal.write(startWinkel);
+  servoVertikal.write(startWinkel);
+  Serial.println("Wieder am Start (20).");
+}
