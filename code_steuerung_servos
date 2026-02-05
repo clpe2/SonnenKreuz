@@ -1,0 +1,113 @@
+#include <Servo.h>
+
+/*
+ * SOLAR TRACKER COMPLETE SYSTEM (Dual Axis)
+ * Hardware: 4x LDR an A0-A3 | 2x Servo an D9 & D10
+ */
+
+// --- 1. PIN KONFIGURATION ---
+// Sensoren (Deine Belegung)
+const int PIN_OBEN   = A0;  // 12 Uhr
+const int PIN_UNTEN  = A2;  // 6 Uhr
+const int PIN_LINKS  = A3;  // 9 Uhr
+const int PIN_RECHTS = A1;  // 3 Uhr
+
+// Servos
+const int PIN_SERVO_HORIZ = 9;  // Unten (Drehen)
+const int PIN_SERVO_VERT  = 10; // Oben (Kippen)
+
+// --- 2. OBJEKTE & EINSTELLUNGEN ---
+Servo servoHorizontal;
+Servo servoVertikal;
+
+// Ingenieurs-Parameter (P-Regler)
+const int TOLERANZ    = 50;   // Hysterese (Deadband)
+const int WARTEZEIT   = 50;   // Update-Rate in ms
+
+// Limits (Mechanischer Schutz)
+const int LIMIT_VERT_MIN = 20;   
+const int LIMIT_VERT_MAX = 160;
+const int LIMIT_HORIZ_MIN = 0;
+const int LIMIT_HORIZ_MAX = 180;
+
+// Start-Winkel
+int zielWinkelVertikal   = 90; 
+int zielWinkelHorizontal = 90; 
+
+void setup() {
+  Serial.begin(9600);
+  
+  // Servos initialisieren
+  servoHorizontal.attach(PIN_SERVO_HORIZ);
+  servoVertikal.attach(PIN_SERVO_VERT);
+
+  // Startposition anfahren
+  servoHorizontal.write(zielWinkelHorizontal);
+  servoVertikal.write(zielWinkelVertikal);
+
+  Serial.println("--- SOLAR TRACKER GESTARTET ---");
+  delay(1000);
+}
+
+void loop() {
+  // === A. REGLER-PARAMETER ===
+  float Kp = 0.15;      // Reaktionsstärke
+  int minSchritt = 1;   
+  int maxSchritt = 5;   
+
+  // === B. MESSUNG ===
+  // Wir lesen die Helligkeitswerte der 4 LDRs
+  int valOben   = analogRead(PIN_OBEN);
+  int valUnten  = analogRead(PIN_UNTEN);
+  int valLinks  = analogRead(PIN_LINKS);
+  int valRechts = analogRead(PIN_RECHTS);
+
+  // === C. LOGIK VERTIKAL (Neigung) ===
+  int diffVert = valOben - valUnten;
+  
+  if (abs(diffVert) > TOLERANZ) {
+    // Geschwindigkeit berechnen
+    int speed = abs(diffVert) * Kp;
+    speed = constrain(speed, minSchritt, maxSchritt);
+    
+    // Richtung bestimmen
+    if (valOben > valUnten) {
+      zielWinkelVertikal += speed;  // Nach Oben schauen
+    } else {
+      zielWinkelVertikal -= speed;  // Nach Unten schauen
+    }
+  }
+
+  // === D. LOGIK HORIZONTAL (Drehung) ===
+  int diffHoriz = valLinks - valRechts;
+
+  if (abs(diffHoriz) > TOLERANZ) {
+    int speed = abs(diffHoriz) * Kp;
+    speed = constrain(speed, minSchritt, maxSchritt);
+
+    if (valLinks > valRechts) {
+      zielWinkelHorizontal -= speed; // Nach Links drehen
+    } else {
+      zielWinkelHorizontal += speed; // Nach Rechts drehen
+    }
+  }
+
+  // === E. SICHERHEIT (Constraints) ===
+  // Verhindert, dass die Servos gegen den Anschlag knallen
+  zielWinkelVertikal   = constrain(zielWinkelVertikal, LIMIT_VERT_MIN, LIMIT_VERT_MAX);
+  zielWinkelHorizontal = constrain(zielWinkelHorizontal, LIMIT_HORIZ_MIN, LIMIT_HORIZ_MAX);
+
+  // === F. MOTOR-STEUERUNG (Das Wichtigste!) ===
+  // Hier werden die berechneten Winkel an die Servos gesendet
+  servoHorizontal.write(zielWinkelHorizontal);
+  servoVertikal.write(zielWinkelVertikal);
+
+  // === G. DEBUGGING ===
+  // Zeigt dir im Seriellen Monitor, was passiert
+  /*
+  Serial.print("V_Ziel:"); Serial.print(zielWinkelVertikal);
+  Serial.print("\tH_Ziel:"); Serial.println(zielWinkelHorizontal);
+  */
+  
+  delay(WARTEZEIT);
+}
