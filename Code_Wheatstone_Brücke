@@ -1,97 +1,134 @@
 /*
- * SOLAR TRACKER LOGIC (P-CONTROL)
- * Hardware: Keyestudio 3-Pin Module (Widerstand ist intern verbaut)
- * Verkabelung: S -> Analog Pin, V -> 5V, G -> GND
+ * HYBRID SOLAR TRACKER FIRMWARE
+ * ------------------------------------------------
+ * Strategie:
+ * 1. INITIALISIERUNG: Global Scan (0-180 Grad) um die Sonne zu finden.
+ * 2. BETRIEB: P-Regler (Closed Loop) für effizientes Nachführen.
+ * ------------------------------------------------
  */
 
-// --- 1. PIN ZUORDNUNG (Kreis-Anordnung) ---
-// Oben (12 Uhr)
-const int PIN_OBEN   = A0;
-// Unten (6 Uhr) - Gegenüber von A0
-const int PIN_UNTEN  = A2;
+#include <Servo.h>
 
-// Links (9 Uhr)
+// --- 1. HARDWARE KONFIGURATION ---
+Servo servoHoriz;  // Unten (Azimut)
+Servo servoVert;   // Oben (Elevation)
+
+const int PIN_SERVO_H = 9;
+const int PIN_SERVO_V = 10;
+
+// Sensoren (Deine Kreis-Anordnung)
+const int PIN_OBEN   = A0;
+const int PIN_UNTEN  = A2;
 const int PIN_LINKS  = A3;
-// Rechts (3 Uhr) - Gegenüber von A3
 const int PIN_RECHTS = A1;
 
-// --- 2. P-REGLER EINSTELLUNGEN ---
-// Hier stellst du die Empfindlichkeit ein
-float Kp = 0.15;       // Verstärkung: 0.15 ist ein guter Mittelwert
-int minSchritt = 1;    // Mindestens 1 Grad bewegen (gegen Haftreibung)
-int maxSchritt = 5;    // Maximal 5 Grad springen (Sicherheit)
-int toleranz   = 40;   // Hysterese: Erst ab Diff > 40 reagieren
+// --- 2. REGEL-PARAMETER (Tuning) ---
+float Kp = 0.15;        // P-Faktor (Reaktionsstärke)
+int toleranz = 40;      // Hysterese (Totzone)
+int minSchritt = 1;     // Mindest-Bewegung
+int maxSchritt = 5;     // Höchst-Geschwindigkeit
 
-// --- 3. STATUS VARIABLES ---
-// Startposition in der Mitte
-int winkelVertikal   = 90; 
-int winkelHorizontal = 90; 
-
-// Sicherheits-Limits für die Servos
-const int LIMIT_V_MIN = 20;  
-const int LIMIT_V_MAX = 160;
-const int LIMIT_H_MIN = 0;
-const int LIMIT_H_MAX = 180;
+// --- 3. STATUS-VARIABLEN ---
+int winkelH = 90;
+int winkelV = 45; // Startet leicht nach oben geneigt
 
 void setup() {
   Serial.begin(9600);
-  Serial.println("--- SOLAR TRACKER: P-CONTROL MODUS ---");
+  Serial.println("--- SYSTEM START: HYBRID TRACKER ---");
+
+  // Servos aktivieren
+  servoHoriz.attach(PIN_SERVO_H);
+  servoVert.attach(PIN_SERVO_V);
+
+  // Schritt 1: Einmaliger Global Scan beim Start!
+  performGlobalScan(); 
 }
 
 void loop() {
-  // === A. MESSUNG ===
-  // Keyestudio Module: Viel Licht = Hoher Wert (meistens)
-  int valOben   = analogRead(PIN_OBEN);
-  int valUnten  = analogRead(PIN_UNTEN);
-  int valLinks  = analogRead(PIN_LINKS);
-  int valRechts = analogRead(PIN_RECHTS);
-
-  // === B. LOGIK FÜR VERTIKAL (Hoch/Runter) ===
-  int diffVert = valOben - valUnten;
+  // Schritt 2: Der normale P-Regler (Endlosschleife)
+  runTrackingLogic();
   
-  if (abs(diffVert) > toleranz) {
-    // 1. P-Regler: Berechne Geschwindigkeit dynamisch
-    int speed = abs(diffVert) * Kp;
+  delay(50); // Taktrate 20Hz
+}
+
+// ==========================================
+// FUNKTION A: DER TRACKING-LOOP (Alltag)
+// ==========================================
+void runTrackingLogic() {
+  int o = analogRead(PIN_OBEN);
+  int u = analogRead(PIN_UNTEN);
+  int l = analogRead(PIN_LINKS);
+  int r = analogRead(PIN_RECHTS);
+
+  // --- Vertikal (Hoch/Runter) ---
+  int diffV = o - u;
+  if (abs(diffV) > toleranz) {
+    int speed = abs(diffV) * Kp;
+    speed = constrain(speed, minSchritt, maxSchritt);
     
-    // 2. Begrenzer (Clamping)
-    if (speed < minSchritt) speed = minSchritt;
-    if (speed > maxSchritt) speed = maxSchritt;
+    if (o > u) winkelV += speed; 
+    else       winkelV -= speed;
+  }
+
+  // --- Horizontal (Links/Rechts) ---
+  int diffH = l - r;
+  if (abs(diffH) > toleranz) {
+    int speed = abs(diffH) * Kp;
+    speed = constrain(speed, minSchritt, maxSchritt);
+
+    if (l > r) winkelH -= speed; // (Evtl. +/- tauschen je nach Motor)
+    else       winkelH += speed;
+  }
+
+  // Limits einhalten & Motoren bewegen
+  winkelV = constrain(winkelV, 20, 160);
+  winkelH = constrain(winkelH, 0, 180);
+  
+  servoVert.write(winkelV);
+  servoHoriz.write(winkelH);
+  
+  // Debug-Ausgabe (optional)
+  // Serial.print("V:"); Serial.print(winkelV); Serial.print(" H:"); Serial.println(winkelH);
+}
+
+// ==========================================
+// FUNKTION B: DER GLOBAL SCAN (Initialisierung)
+// ==========================================
+void performGlobalScan() {
+  Serial.println(">>> STARTE SCAN-SEQUENZ...");
+  
+  // 1. Kopf in optimale Such-Position bringen (45 Grad hoch)
+  servoVert.write(45); 
+  delay(1000);
+
+  int maxLicht = -1;      // Speicher für hellsten Wert
+  int besterWinkel = 90;  // Speicher für beste Position
+
+  // 2. Scan von Links (0) nach Rechts (180)
+  for (int pos = 0; pos <= 180; pos += 5) {
+    servoHoriz.write(pos);
+    delay(150); // Kurz warten, damit Sensoren sich einschwingen
     
-    // 3. Bewegung
-    // Falls er falsch herum läuft, tausche hier + und -
-    if (valOben > valUnten) {
-      winkelVertikal += speed; // Nach Oben schauen
-    } else {
-      winkelVertikal -= speed; // Nach Unten schauen
+    // Wir messen die GESAMT-Helligkeit an diesem Punkt
+    int total = analogRead(PIN_OBEN) + analogRead(PIN_UNTEN) + 
+                analogRead(PIN_LINKS) + analogRead(PIN_RECHTS);
+    
+    Serial.print("Winkel: "); Serial.print(pos);
+    Serial.print(" -> Lichtsumme: "); Serial.println(total);
+
+    // Ist das heller als alles bisherige?
+    if (total > maxLicht) {
+      maxLicht = total;
+      besterWinkel = pos;
     }
   }
 
-  // === C. LOGIK FÜR HORIZONTAL (Links/Rechts) ===
-  int diffHoriz = valLinks - valRechts;
-
-  if (abs(diffHoriz) > toleranz) {
-    int speed = abs(diffHoriz) * Kp;
-    
-    if (speed < minSchritt) speed = minSchritt;
-    if (speed > maxSchritt) speed = maxSchritt;
-
-    // Falls er falsch herum läuft, tausche hier + und -
-    if (valLinks > valRechts) {
-      winkelHorizontal -= speed; // Nach Links drehen
-    } else {
-      winkelHorizontal += speed; // Nach Rechts drehen
-    }
-  }
-
-  // === D. SICHERHEIT & OUTPUT ===
-  // Verhindern, dass der Motor gegen die Wand fährt
-  winkelVertikal   = constrain(winkelVertikal, LIMIT_V_MIN, LIMIT_V_MAX);
-  winkelHorizontal = constrain(winkelHorizontal, LIMIT_H_MIN, LIMIT_H_MAX);
-
-  // Ausgabe für den Plotter
-  Serial.print("Ziel_V:");     Serial.print(winkelVertikal);
-  Serial.print("\t"); 
-  Serial.print("Ziel_H:");   Serial.println(winkelHorizontal);
+  // 3. Ergebnis anwenden
+  Serial.print(">>> SCAN BEENDET. Optimum gefunden bei: ");
+  Serial.println(besterWinkel);
   
-  delay(50); // Kleines Päuschen für Stabilität
+  winkelH = besterWinkel; // Variable aktualisieren
+  servoHoriz.write(winkelH); // Motor schnell dort hin fahren
+  
+  delay(1000); // Kurz warten vor Tracking-Start
 }
