@@ -1,0 +1,107 @@
+#include <Servo.h>
+
+/*
+ * SOLAR TRACKER - DEBUG EDITION
+ * Features: 
+ * 1. Hysterese (kein Zittern bei kleinen Wolken)
+ * 2. Speed-Limit (Max 5 Grad pro Sekunde)
+ * 3. Startet bei 0 Grad (Vertikal & Horizontal)
+ * 4. NEU: Serial Monitor zeigt die Differenzen an
+ */
+
+// --- 1. PIN KONFIGURATION ---
+const int PIN_OBEN   = A1; 
+const int PIN_UNTEN  = A3; 
+const int PIN_LINKS  = A0; 
+const int PIN_RECHTS = A2; 
+
+const int PIN_SERVO_HORIZ = 6;  
+const int PIN_SERVO_VERT  = 3; 
+
+// --- 2. OBJEKTE ---
+Servo servoHorizontal;
+Servo servoVertikal;
+
+// --- 3. EINSTELLUNGEN ---
+
+// Hysterese: Je höher der Wert, desto "fauler" ist der Tracker.
+const int TOLERANZ = 5;   
+
+// Geschwindigkeit: 
+// 100ms Pause = 5 Schritte pro Sekunde (5°/sek)
+const int WARTEZEIT = 100; 
+
+// Limits (Mechanischer Schutz)
+const int LIMIT_VERT_MIN = 0;    
+const int LIMIT_VERT_MAX = 160;
+const int LIMIT_HORIZ_MIN = 0;
+const int LIMIT_HORIZ_MAX = 180;
+
+// Aktuelle Positionen
+int winkelVertikal   = 90; 
+int winkelHorizontal = 180; 
+
+void setup() {
+  Serial.begin(9600);
+  
+  servoHorizontal.attach(PIN_SERVO_HORIZ);
+  servoVertikal.attach(PIN_SERVO_VERT);
+
+  // Startposition einnehmen
+  servoHorizontal.write(winkelHorizontal);
+  servoVertikal.write(winkelVertikal);
+
+  Serial.println("--- SOLAR TRACKER GESTARTET ---");
+}
+
+void loop() {
+  // === A. MESSUNG ===
+  int valOben   = analogRead(PIN_OBEN);
+  int valUnten  = analogRead(PIN_UNTEN);
+  int valLinks  = analogRead(PIN_LINKS);
+  int valRechts = analogRead(PIN_RECHTS);
+
+  // === NEU: AUSGABE DER DIFFERENZEN ===
+  // Berechnung genau wie angefordert:
+  int diffPrintVert = valOben - valUnten;
+  int diffPrintHoriz = valRechts - valLinks; 
+
+  Serial.print("Diff Oben-Unten: ");
+  Serial.print(diffPrintVert);
+  Serial.print(" \t| Diff Rechts-Links: "); // \t macht einen Tab-Abstand
+  Serial.println(diffPrintHoriz);
+  // ====================================
+
+  // === B. LOGIK VERTIKAL (Oben/Unten) ===
+  int diffVert = valOben - valUnten;
+  
+  if (abs(diffVert) > TOLERANZ) {
+    if (valOben > valUnten) {
+      winkelVertikal++;  
+    } else {
+      winkelVertikal--;  
+    }
+  }
+
+  // === C. LOGIK HORIZONTAL (Links/Rechts) ===
+  int diffHoriz = valLinks - valRechts;
+
+  if (abs(diffHoriz) > TOLERANZ) {
+    if (valLinks > valRechts) {
+      winkelHorizontal--; 
+    } else {
+      winkelHorizontal++; 
+    }
+  }
+
+  // === D. SICHERHEIT (Begrenzungen) ===
+  winkelVertikal   = constrain(winkelVertikal, LIMIT_VERT_MIN, LIMIT_VERT_MAX);
+  winkelHorizontal = constrain(winkelHorizontal, LIMIT_HORIZ_MIN, LIMIT_HORIZ_MAX);
+
+  // === E. MOTOR UPDATE ===
+  servoHorizontal.write(winkelHorizontal);
+  servoVertikal.write(winkelVertikal);
+
+  // === F. GESCHWINDIGKEITS-BREMSE ===
+  delay(WARTEZEIT); 
+}
