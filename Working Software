@@ -1,0 +1,127 @@
+#include <Servo.h>
+
+/*
+ * SOLAR TRACKER - P-CONTROL & SMOOTH SENSOR EDITION
+ * Features: 
+ * 1. Hysterese (kein Zittern bei kleinen Wolken)
+ * 2. P-Regler (Schnell bei großer Abweichung, sanft am Ziel)
+ * 3. Max-Speed-Limit pro Zyklus für weiche Bewegungen
+ * 4. Mittelwertbildung (Rauschunterdrückung der Sensoren)
+ */
+
+// --- 1. PIN KONFIGURATION ---
+const int PIN_OBEN   = A3; 
+const int PIN_UNTEN  = A1; 
+const int PIN_LINKS  = A0; 
+const int PIN_RECHTS = A2; 
+
+const int PIN_SERVO_HORIZ = 6;  
+const int PIN_SERVO_VERT  = 5; 
+
+// --- 2. OBJEKTE ---
+Servo servoHorizontal;
+Servo servoVertikal;
+
+// --- 3. EINSTELLUNGEN ---
+
+// Anzahl der Messungen für den Mittelwert (5 bis 10 sind ideal)
+const int MESSUNGEN = 5;
+
+// Hysterese-Totzone (erst ab hier wird geregelt)
+const int TOLERANZ = 40;   
+
+// P-REGLER PARAMETER
+const float Kp = 0.02;     
+
+// Limitiert die maximale Grad-Änderung pro Takt
+const int MAX_SCHRITT = 3; 
+
+// Loop-Pause für flüssigere P-Regelung (50ms)
+const int WARTEZEIT = 50;  
+
+// Limits (Mechanischer Schutz)
+const int LIMIT_VERT_MIN = 20;   
+const int LIMIT_VERT_MAX = 160;
+const int LIMIT_HORIZ_MIN = 0;
+const int LIMIT_HORIZ_MAX = 180;
+
+// Aktuelle Positionen
+int winkelVertikal   = 90; 
+int winkelHorizontal = 90; 
+
+void setup() {
+  Serial.begin(9600);
+  
+  servoHorizontal.attach(PIN_SERVO_HORIZ);
+  servoVertikal.attach(PIN_SERVO_VERT);
+
+  // Startposition einnehmen
+  servoHorizontal.write(winkelHorizontal);
+  servoVertikal.write(winkelVertikal);
+
+  Serial.println("--- SOLAR TRACKER (P-REGELUNG + FILTER) GESTARTET ---");
+}
+
+void loop() {
+  // === A. MESSUNG (MITTELWERTBILDUNG) ===
+  // 1. Temporäre Variablen für die Summe erstellen und auf 0 setzen
+  long sumOben = 0;
+  long sumUnten = 0;
+  long sumLinks = 0;
+  long sumRechts = 0;
+
+  // 2. Mehrfach messen und aufaddieren
+  for (int i = 0; i < MESSUNGEN; i++) {
+    sumOben   += analogRead(PIN_OBEN);
+    sumUnten  += analogRead(PIN_UNTEN);
+    sumLinks  += analogRead(PIN_LINKS);
+    sumRechts += analogRead(PIN_RECHTS);
+    delay(2); // Dem ADC-Wandler 2 Millisekunden Zeit zum Umschalten geben
+  }
+
+  // 3. Durch die Anzahl der Messungen teilen, um den Durchschnitt zu erhalten
+  int valOben   = sumOben / MESSUNGEN;
+  int valUnten  = sumUnten / MESSUNGEN;
+  int valLinks  = sumLinks / MESSUNGEN;
+  int valRechts = sumRechts / MESSUNGEN;
+
+  // === B. LOGIK VERTIKAL (Oben/Unten) ===
+  int diffVert = valOben - valUnten;
+  
+  // Hysterese-Check
+  if (abs(diffVert) > TOLERANZ) {
+    // 1. P-Regelung
+    int schrittV = diffVert * Kp;
+    
+    // 2. Geschwindigkeit kappen
+    schrittV = constrain(schrittV, -MAX_SCHRITT, MAX_SCHRITT);
+    
+    // 3. Winkel aktualisieren
+    winkelVertikal -= schrittV;
+  }
+
+  // === C. LOGIK HORIZONTAL (Links/Rechts) ===
+  int diffHoriz = valRechts - valLinks;
+
+  if (abs(diffHoriz) > TOLERANZ) {
+    // 1. P-Regelung anwenden
+    int schrittH = diffHoriz * Kp;
+    
+    // 2. Geschwindigkeit kappen
+    schrittH = constrain(schrittH, -MAX_SCHRITT, MAX_SCHRITT);
+    
+    // 3. Winkel aktualisieren
+    winkelHorizontal -= schrittH; 
+  }
+
+  // === D. SICHERHEIT (Begrenzungen) ===
+  winkelVertikal   = constrain(winkelVertikal, LIMIT_VERT_MIN, LIMIT_VERT_MAX);
+  winkelHorizontal = constrain(winkelHorizontal, LIMIT_HORIZ_MIN, LIMIT_HORIZ_MAX);
+
+  // === E. MOTOR UPDATE ===
+  servoHorizontal.write(winkelHorizontal);
+  servoVertikal.write(winkelVertikal);
+
+  // === F. TAKTUNG ===
+  delay(WARTEZEIT); 
+}
