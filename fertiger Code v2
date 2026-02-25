@@ -1,0 +1,174 @@
+#include <Servo.h>
+
+/*
+ * SOLAR TRACKER - P-CONTROL DUAL SETUP EDITION v2
+ * Features: 
+ * 1. Synchroner Betrieb von ZWEI Solar-Einheiten
+ * 2. Hysterese (kein Zittern bei kleinen Wolken)
+ * 3. P-Regler (Schnell bei großer Abweichung, sanft am Ziel)
+ * 4. Max-Speed-Limit pro Zyklus für weiche Bewegungen
+ * 5. Mittelwertbildung (Rauschunterdrückung der Sensoren)
+ * 6. NEU: Nacht-/Dunkelheitserkennung (kein zielloses Suchen)
+ * 7. NEU: Sensor-Plausibilitätscheck (Schutz bei defektem LDR)
+ * 8. NEU: Anti-Rundungs-Stillstand im P-Regler
+ */
+
+// --- 1. PIN KONFIGURATION ---
+const int PIN_OBEN   = A3; 
+const int PIN_UNTEN  = A1; 
+const int PIN_LINKS  = A0; 
+const int PIN_RECHTS = A2; 
+
+// Setup 1
+const int PIN_SERVO_HORIZ = 6;  
+const int PIN_SERVO_VERT  = 5; 
+
+// Setup 2 (Neu)
+const int PIN_SERVO_HORIZ_2 = 10; // Neuer horizontaler Servo
+const int PIN_SERVO_VERT_2  = 11; // Neuer vertikaler Servo
+
+// --- 2. OBJEKTE ---
+Servo servoHorizontal;
+Servo servoVertikal;
+
+Servo servoHorizontal2; // Zweites Setup
+Servo servoVertikal2;   // Zweites Setup
+
+// --- 3. EINSTELLUNGEN ---
+
+// Anzahl der Messungen für den Mittelwert (5 bis 10 sind ideal)
+const int MESSUNGEN = 5;
+
+// Hysterese-Totzone (erst ab hier wird geregelt)
+const int TOLERANZ = 40;   
+
+// P-REGLER PARAMETER
+const float Kp = 0.02;     
+
+// Limitiert die maximale Grad-Änderung pro Takt
+const int MAX_SCHRITT = 3; 
+
+// Loop-Pause für flüssigere P-Regelung (50ms)
+const int WARTEZEIT = 50;  
+
+// Bei sehr wenig Licht (Abend/Nacht) nicht mehr nachregeln
+const int MIN_GESAMTLICHT = 120;
+
+// Grober Plausibilitätsbereich für LDR-Messwerte
+const int SENSOR_MIN_VALID = 2;
+const int SENSOR_MAX_VALID = 1021;
+
+// Limits (Mechanischer Schutz)
+const int LIMIT_VERT_MIN = 20;   
+const int LIMIT_VERT_MAX = 160;
+const int LIMIT_HORIZ_MIN = 0;
+const int LIMIT_HORIZ_MAX = 180;
+
+// Aktuelle Positionen
+int winkelVertikal   = 90; 
+int winkelHorizontal = 90; 
+
+// Hilfsfunktion: Berechnet den Regelschritt inkl. Hysterese,
+// P-Anteil, Geschwindigkeitsbegrenzung und Anti-Rundungs-Stillstand
+int berechneSchritt(int differenz) {
+  if (abs(differenz) <= TOLERANZ) {
+    return 0;
+  }
+  float rohSchritt = differenz * Kp;
+  int schritt = (int)round(rohSchritt);
+  // Verhindert Stillstand durch Rundung nahe der Totzone
+  if (schritt == 0) {
+    schritt = (differenz > 0) ? 1 : -1;
+  }
+  return constrain(schritt, -MAX_SCHRITT, MAX_SCHRITT);
+}
+
+void setup() {
+  Serial.begin(9600);
+  
+  // Servos Setup 1
+  servoHorizontal.attach(PIN_SERVO_HORIZ);
+  servoVertikal.attach(PIN_SERVO_VERT);
+
+  // Servos Setup 2
+  servoHorizontal2.attach(PIN_SERVO_HORIZ_2);
+  servoVertikal2.attach(PIN_SERVO_VERT_2);
+
+  // Startposition einnehmen (Beide Aufbauten)
+  servoHorizontal.write(winkelHorizontal);
+  servoVertikal.write(winkelVertikal);
+  
+  servoHorizontal2.write(winkelHorizontal);
+  servoVertikal2.write(winkelVertikal);
+
+  Serial.println("--- SOLAR TRACKER v2 (P-REGELUNG + DUAL SETUP) GESTARTET ---");
+}
+
+void loop() {
+  // === A. MESSUNG (MITTELWERTBILDUNG) ===
+  // 1. Temporäre Variablen für die Summe erstellen und auf 0 setzen
+  long sumOben = 0;
+  long sumUnten = 0;
+  long sumLinks = 0;
+  long sumRechts = 0;
+
+  // 2. Mehrfach messen und aufaddieren
+  for (int i = 0; i < MESSUNGEN; i++) {
+    sumOben   += analogRead(PIN_OBEN);
+    sumUnten  += analogRead(PIN_UNTEN);
+    sumLinks  += analogRead(PIN_LINKS);
+    sumRechts += analogRead(PIN_RECHTS);
+    delay(2); // Dem ADC-Wandler 2 Millisekunden Zeit zum Umschalten geben
+  }
+
+  // 3. Durch die Anzahl der Messungen teilen, um den Durchschnitt zu erhalten
+  int valOben   = sumOben / MESSUNGEN;
+  int valUnten  = sumUnten / MESSUNGEN;
+  int valLinks  = sumLinks / MESSUNGEN;
+  int valRechts = sumRechts / MESSUNGEN;
+
+  // === B. PLAUSIBILITÄTSCHECK ===
+  // Bei defektem/abgeklemmtem LDR (Wert ~0 oder ~1023) nicht fahren
+  bool sensorUngueltig =
+    valOben  <= SENSOR_MIN_VALID || valOben  >= SENSOR_MAX_VALID ||
+    valUnten <= SENSOR_MIN_VALID || valUnten >= SENSOR_MAX_VALID ||
+    valLinks <= SENSOR_MIN_VALID || valLinks >= SENSOR_MAX_VALID ||
+    valRechts<= SENSOR_MIN_VALID || valRechts>= SENSOR_MAX_VALID;
+
+  if (sensorUngueltig) {
+    delay(WARTEZEIT);
+    return; // Diesen Zyklus überspringen
+  }
+
+  // === C. NACHT-/DUNKELHEITSERKENNUNG ===
+  // Bei zu wenig Licht nicht nachführen (verhindert zielloses Suchen)
+  int gesamtLicht = (valOben + valUnten + valLinks + valRechts) / 4;
+  if (gesamtLicht < MIN_GESAMTLICHT) {
+    delay(WARTEZEIT);
+    return;
+  }
+
+  // === D. LOGIK VERTIKAL (Oben/Unten) ===
+  int diffVert = valOben - valUnten;
+  int schrittV = berechneSchritt(diffVert);
+  winkelVertikal -= schrittV;
+
+  // === E. LOGIK HORIZONTAL (Links/Rechts) ===
+  int diffHoriz = valRechts - valLinks;
+  int schrittH = berechneSchritt(diffHoriz);
+  winkelHorizontal -= schrittH;
+
+  // === F. SICHERHEIT (Begrenzungen) ===
+  winkelVertikal   = constrain(winkelVertikal, LIMIT_VERT_MIN, LIMIT_VERT_MAX);
+  winkelHorizontal = constrain(winkelHorizontal, LIMIT_HORIZ_MIN, LIMIT_HORIZ_MAX);
+
+  // === G. MOTOR UPDATE (BEIDE AUFBAUTEN) ===
+  servoHorizontal.write(winkelHorizontal);
+  servoVertikal.write(winkelVertikal);
+
+  servoHorizontal2.write(winkelHorizontal);
+  servoVertikal2.write(winkelVertikal);
+
+  // === H. TAKTUNG ===
+  delay(WARTEZEIT); 
+}
