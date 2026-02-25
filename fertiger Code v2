@@ -1,7 +1,7 @@
 #include <Servo.h>
 
 /*
- * SOLAR TRACKER - P-CONTROL DUAL SETUP EDITION v2
+ * SOLAR TRACKER - P-CONTROL DUAL SETUP EDITION v2 (MIT SANFTEM START & AUSGABE)
  * Features: 
  * 1. Synchroner Betrieb von ZWEI Solar-Einheiten
  * 2. Hysterese (kein Zittern bei kleinen Wolken)
@@ -11,32 +11,36 @@
  * 6. NEU: Nacht-/Dunkelheitserkennung (kein zielloses Suchen)
  * 7. NEU: Sensor-Plausibilitätscheck (Schutz bei defektem LDR)
  * 8. NEU: Anti-Rundungs-Stillstand im P-Regler
+ * 9. NEU: Einstellbarer, langsamer Sanftanlauf beim Einschalten
  */
 
 // --- 1. PIN KONFIGURATION ---
 const int PIN_OBEN   = A3; 
 const int PIN_UNTEN  = A1; 
-const int PIN_LINKS  = A0; 
+const int PIN_LINKS  = A5; 
 const int PIN_RECHTS = A2; 
 
 // Setup 1
 const int PIN_SERVO_HORIZ = 6;  
 const int PIN_SERVO_VERT  = 5; 
 
-// Setup 2 (Neu)
-const int PIN_SERVO_HORIZ_2 = 10; // Neuer horizontaler Servo
-const int PIN_SERVO_VERT_2  = 11; // Neuer vertikaler Servo
+// Setup 2
+const int PIN_SERVO_HORIZ_2 = 10; 
+const int PIN_SERVO_VERT_2  = 11; 
 
 // --- 2. OBJEKTE ---
 Servo servoHorizontal;
 Servo servoVertikal;
-
-Servo servoHorizontal2; // Zweites Setup
-Servo servoVertikal2;   // Zweites Setup
+Servo servoHorizontal2; 
+Servo servoVertikal2;   
 
 // --- 3. EINSTELLUNGEN ---
 
-// Anzahl der Messungen für den Mittelwert (5 bis 10 sind ideal)
+// === NEU: START-GESCHWINDIGKEIT ===
+// Pause in Millisekunden pro Grad beim Hochfahren (Je höher die Zahl, desto langsamer)
+const int START_GESCHWINDIGKEIT = 30; 
+
+// Anzahl der Messungen für den Mittelwert 
 const int MESSUNGEN = 5;
 
 // Hysterese-Totzone (erst ab hier wird geregelt)
@@ -76,6 +80,7 @@ int berechneSchritt(int differenz) {
   }
   float rohSchritt = differenz * Kp;
   int schritt = (int)round(rohSchritt);
+  
   // Verhindert Stillstand durch Rundung nahe der Totzone
   if (schritt == 0) {
     schritt = (differenz > 0) ? 1 : -1;
@@ -86,49 +91,66 @@ int berechneSchritt(int differenz) {
 void setup() {
   Serial.begin(9600);
   
-  // Servos Setup 1
+  // 1. Motoren zwingend auf 0 Grad setzen, BEVOR der Strom freigegeben wird
+  servoHorizontal.write(0);
+  servoVertikal.write(0);
+  servoHorizontal2.write(0);
+  servoVertikal2.write(0);
+  
+  // 2. Servos aktivieren
   servoHorizontal.attach(PIN_SERVO_HORIZ);
   servoVertikal.attach(PIN_SERVO_VERT);
-
-  // Servos Setup 2
   servoHorizontal2.attach(PIN_SERVO_HORIZ_2);
   servoVertikal2.attach(PIN_SERVO_VERT_2);
 
-  // Startposition einnehmen (Beide Aufbauten)
-  servoHorizontal.write(winkelHorizontal);
-  servoVertikal.write(winkelVertikal);
-  
-  servoHorizontal2.write(winkelHorizontal);
-  servoVertikal2.write(winkelVertikal);
-
   Serial.println("--- SOLAR TRACKER v2 (P-REGELUNG + DUAL SETUP) GESTARTET ---");
+  Serial.println("Kalibrierung: Fahre langsam in die Startposition (90 Grad)...");
+
+  // 3. SANFTER START: Wir zählen von 0 bis 90 hoch, mit Pausen dazwischen
+  for (int pos = 0; pos <= 90; pos++) {
+    servoHorizontal.write(pos);
+    servoVertikal.write(pos);
+    servoHorizontal2.write(pos);
+    servoVertikal2.write(pos);
+    delay(START_GESCHWINDIGKEIT); // Hier greift deine eingestellte Geschwindigkeit!
+  }
+
+  Serial.println("Kalibrierung beendet. Tracking beginnt!");
 }
 
 void loop() {
   // === A. MESSUNG (MITTELWERTBILDUNG) ===
-  // 1. Temporäre Variablen für die Summe erstellen und auf 0 setzen
-  long sumOben = 0;
-  long sumUnten = 0;
-  long sumLinks = 0;
-  long sumRechts = 0;
+  long sumOben = 0, sumUnten = 0, sumLinks = 0, sumRechts = 0;
 
-  // 2. Mehrfach messen und aufaddieren
   for (int i = 0; i < MESSUNGEN; i++) {
     sumOben   += analogRead(PIN_OBEN);
     sumUnten  += analogRead(PIN_UNTEN);
     sumLinks  += analogRead(PIN_LINKS);
     sumRechts += analogRead(PIN_RECHTS);
-    delay(2); // Dem ADC-Wandler 2 Millisekunden Zeit zum Umschalten geben
+    delay(2); 
   }
 
-  // 3. Durch die Anzahl der Messungen teilen, um den Durchschnitt zu erhalten
   int valOben   = sumOben / MESSUNGEN;
   int valUnten  = sumUnten / MESSUNGEN;
   int valLinks  = sumLinks / MESSUNGEN;
   int valRechts = sumRechts / MESSUNGEN;
 
-  // === B. PLAUSIBILITÄTSCHECK ===
-  // Bei defektem/abgeklemmtem LDR (Wert ~0 oder ~1023) nicht fahren
+  int diffVert = valOben - valUnten;
+  int diffHoriz = valRechts - valLinks;
+  int gesamtLicht = (valOben + valUnten + valLinks + valRechts) / 4;
+
+  // === B. SERIELLE AUSGABE ===
+  Serial.print("O:"); Serial.print(valOben);
+  Serial.print(" | U:"); Serial.print(valUnten);
+  Serial.print(" | L:"); Serial.print(valLinks);
+  Serial.print(" | R:"); Serial.print(valRechts);
+  Serial.print(" -> Diff V:"); Serial.print(diffVert);
+  Serial.print(" H:"); Serial.print(diffHoriz);
+  Serial.print(" [Winkel V:"); Serial.print(winkelVertikal);
+  Serial.print(" H:"); Serial.print(winkelHorizontal);
+  Serial.print("]");
+
+  // === C. PLAUSIBILITÄTSCHECK ===
   bool sensorUngueltig =
     valOben  <= SENSOR_MIN_VALID || valOben  >= SENSOR_MAX_VALID ||
     valUnten <= SENSOR_MIN_VALID || valUnten >= SENSOR_MAX_VALID ||
@@ -136,39 +158,40 @@ void loop() {
     valRechts<= SENSOR_MIN_VALID || valRechts>= SENSOR_MAX_VALID;
 
   if (sensorUngueltig) {
+    Serial.println(" <--- STATUS: FEHLER! (Sensor ungültig / Kabel ab?)");
     delay(WARTEZEIT);
     return; // Diesen Zyklus überspringen
   }
 
-  // === C. NACHT-/DUNKELHEITSERKENNUNG ===
-  // Bei zu wenig Licht nicht nachführen (verhindert zielloses Suchen)
-  int gesamtLicht = (valOben + valUnten + valLinks + valRechts) / 4;
+  // === D. NACHT-/DUNKELHEITSERKENNUNG ===
   if (gesamtLicht < MIN_GESAMTLICHT) {
+    Serial.println(" <--- STATUS: NACHTMODUS (Zu dunkel, Motoren ruhen)");
     delay(WARTEZEIT);
     return;
   }
 
-  // === D. LOGIK VERTIKAL (Oben/Unten) ===
-  int diffVert = valOben - valUnten;
+  // Wenn wir hier ankommen, ist alles gut und der Tracker arbeitet
+  Serial.println(" <--- STATUS: TRACKING AKTIV");
+
+  // === E. LOGIK VERTIKAL (Oben/Unten) ===
   int schrittV = berechneSchritt(diffVert);
   winkelVertikal -= schrittV;
 
-  // === E. LOGIK HORIZONTAL (Links/Rechts) ===
-  int diffHoriz = valRechts - valLinks;
+  // === F. LOGIK HORIZONTAL (Links/Rechts) ===
   int schrittH = berechneSchritt(diffHoriz);
   winkelHorizontal -= schrittH;
 
-  // === F. SICHERHEIT (Begrenzungen) ===
+  // === G. SICHERHEIT (Begrenzungen) ===
   winkelVertikal   = constrain(winkelVertikal, LIMIT_VERT_MIN, LIMIT_VERT_MAX);
   winkelHorizontal = constrain(winkelHorizontal, LIMIT_HORIZ_MIN, LIMIT_HORIZ_MAX);
 
-  // === G. MOTOR UPDATE (BEIDE AUFBAUTEN) ===
+  // === H. MOTOR UPDATE (BEIDE AUFBAUTEN) ===
   servoHorizontal.write(winkelHorizontal);
   servoVertikal.write(winkelVertikal);
 
   servoHorizontal2.write(winkelHorizontal);
   servoVertikal2.write(winkelVertikal);
 
-  // === H. TAKTUNG ===
+  // === I. TAKTUNG ===
   delay(WARTEZEIT); 
 }
