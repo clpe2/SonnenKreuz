@@ -24,5 +24,58 @@ h = Höhe des Kreuzes
 alpha = Der Einfallswinkel der Sonne (Abweichung vom Lot)
 
  tan(α)= d/h
+
+
+------------------------------------------------------------
+Kurze Dateiübersicht und Entwicklungsstand
+------------------------------------------------------------
+
+1) Test- und Grundlagenphase
+- Testsoftware:
+	Einfacher Servotest (0 Grad -> 90 Grad -> 0 Grad) mit festen Zeiten.
+	Dient zum mechanischen Check von beiden Achsen.
+
+- Steuerung mit Serialprint:
+	Erste LDR-basierte Regelung mit Hysterese und langsamen Einzelschritten.
+	Zusätzlich serielle Ausgabe der Sensor-Differenzen zum Debuggen.
+
+- code_steuerung_servos:
+	„Smooth“-Variante der Grundregelung.
+	Fokus auf ruhiger Bewegung durch Toleranzzone, Schrittbetrieb und Speed-Limit.
+
+2) Regelung verbessert
+- Working Software:
+	Erweiterung auf P-Regler + Sensor-Mittelwertbildung.
+	Ergebnis: weniger Rauschen, schnellere Reaktion bei großer Abweichung,
+	trotzdem weiche Bewegung nahe Zielwinkel.
+
+- Code_Wheatstone_Brücke:
+	Alternative/Hybrid-Strategie:
+	Beim Start ein Global-Scan (hellste Position suchen), danach normales Tracking
+	über P-Regelung.
+
+3) Ausbaustufe für mehrere Einheiten
+- fertiger Code:
+	Duales Setup (zwei Servo-Paare parallel) mit gemeinsamer Sensorregelung.
+	Funktional im Dauerbetrieb mit denselben Regelparametern für beide Einheiten.
+
+- fertiger Code v2:
+	Weiterentwicklung von „fertiger Code“ mit Robustheitsfunktionen:
+	- Sanfter Start (langsames Hochfahren auf Startwinkel)
+	- Dunkelheits-/Nachtmodus (kein zielloses Nachregeln)
+	- Plausibilitätscheck für Sensorwerte
+	- Anti-Rundungs-Stillstand im P-Regler
+	- Erweiterte serielle Statusausgabe
+
+4) Sonstige Projektdateien
+- Kreuz.f3d:
+	CAD-Modell des mechanischen Kreuz-/Sensorgebers (Fusion 360).
+
+- .gitignore:
+	Git-Ausschlussregeln für nicht zu versionierende Dateien.
+
+Kurzfazit zur Entwicklung:
+Testsoftware -> Debug-Regelung -> ruhige P-Regelung -> Dual-Setup -> robuste v2
+(mit Sanftstart, Nachtmodus und Sensor-Checks).
  
  
